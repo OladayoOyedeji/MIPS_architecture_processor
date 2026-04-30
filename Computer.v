@@ -133,8 +133,8 @@ module Control(Opcode, PCWriteCond, PCWrite, IorD, MemRead,
    output reg       PCWriteCond, IRWrite, PCWrite, RegDst, RegWrite;
    output reg [1:0] ALUOp, ALUSrcB, PCSource;
    localparam       FETCH  = 4'd0, DECODE = 4'd1, MEM_ADR= 4'd2,  MEM_RD = 4'd3,
-                    MEM_WB = 4'd4, EXEC   = 4'd6, R_TYPE = 4'd7, BEQ_STATE = 4'd8,
-                    J_STATE = 4'd9;
+                    MEM_WB = 4'd4, MEM_WR = 4'd5, EXEC   = 4'd6,  R_TYPE = 4'd7,
+                    BEQ_STATE = 4'd8, J_STATE = 4'd9;
    
    reg [3:0]        state, next_state;
 
@@ -188,7 +188,7 @@ module Control(Opcode, PCWriteCond, PCWrite, IorD, MemRead,
            if (Opcode == 6'h23)
              next_state = MEM_RD;
            else
-             next_state = 4'd5;
+             next_state = MEM_WR;
         end
 
         MEM_RD: begin
@@ -204,7 +204,7 @@ module Control(Opcode, PCWriteCond, PCWrite, IorD, MemRead,
            next_state = FETCH;
         end
 
-        4'd5: begin
+        MEM_WR: begin
            IorD = 1;
            MemWrite = 1;
            next_state = FETCH;
