@@ -1,10 +1,11 @@
 module ALU(a, b, op, result, zero, clock);
-   input [31:0]  a;
-   input [31:0]  b;
-   input [3:0]   op;
-   input         clock;
-   output [31:0] result;
-
+   input [31:0]       a;
+   input [31:0]       b;
+   input [3:0]        op;
+   input              clock;
+   output  reg [31:0] result;
+   output             zero;
+   
    always @(*) begin
       case (op)
         4'b0010: begin
@@ -49,7 +50,7 @@ module Decoder(code, decoded, clock);
    end // always @ (posedge clock)
 endmodule
 
-module Registerfile(read1, read2, write_register, write_data,
+module RegisterFile(read1, read2, write_register, write_data,
                     read_data_1, read_data_2, reg_write, clock);
    input [4:0]   read1, read2, write_register;
 
@@ -67,53 +68,10 @@ module Registerfile(read1, read2, write_register, write_data,
    assign read_data_1 = RF[read1];
    assign read_data_2 = RF[read2];
 
-   always begin
-        @(posedge clock) if (reg_write) RF[write_register] <= write_data;
+   always @(posedge clock) begin
+      if (reg_write) RF[write_register] <= write_data;
    end
 endmodule // Registerfile
-
-// module Datapath(instruction, RegDst, RegWrite, writeData, data1, data2, clock);
-//    input [31:0]  instruction;
-//    input [31:0]  writeData;
-
-//    input         RegDst;
-//    input         RegWrite;
-//    input         clock;
-//    output [31:0] data1;
-//    output [31:0] data2;
-   
-   
-//    wire [4:0]    readRegister1;
-//    wire [4:0]    readRegister2;
-//    wire [4:0]    readRegister3;
-//    wire [4:0]    writeRegister;
-
-//    assign readRegister1 = instruction[25:21]; // rs
-//    assign readRegister2 = instruction[20:16]; // rt
-//    assign readRegister3 = instruction[15:11]; // rd
-   
-//    wire [4:0] writeReg = RegDst ? readRegister2: readRegister3;
-   
-//    // Mux mux(
-//    //         .a(readRegister2), 
-//    //         .b(instruction[15:11]), 
-//    //         .s(RegDist),
-//    //         .out(writeRegister),
-//    //         .clock(clock)
-//    //         );
-
-//    Registerfile registers(
-//                     .read1(readRegister1),
-//                     .read2(readRegister2),
-//                     .write_register(writeRegister),
-//                     .write_data(writeData),
-//                     .read_data_1(data1),
-//                     .read_data_2(data2),
-//                     .reg_write(RegWrite),
-//                     .clock(clock)
-//                     );
-
-// endmodule // control
 
 module SRAM(address, dout, din, MemWrite, 
             MemRead, clock);
@@ -125,21 +83,22 @@ module SRAM(address, dout, din, MemWrite,
    output reg [31:0] dout;      // Must be 'reg' because it's assigned in an always block
 
    // 64 x 32-bit array
-   reg [31:0]        memory [0:63];
+   reg [31:0]        memory [0:1023];
 
    // 1. Load the memory from a file at start-up
    initial begin
       $readmemb("test.mem", memory);
+      $display("mem[0]=%b mem[1]=%b", memory[0], memory[1]); // sanity check
    end
 
    // 2. Synchronous Read/Write Logic
    always @(posedge clock) begin
       if (MemWrite) begin
-         memory[address[5:0]] <= din; // Use lower 6 bits for 64 entries
+         memory[address[7:2]] <= din; // Use lower 6 bits for 64 entries
       end
       
       if (MemRead) begin
-         dout <= memory[address[5:0]];
+         dout <= memory[address[7:2]];
       end
    end
 endmodule // SRAM
@@ -165,20 +124,23 @@ endmodule; // mem
 
 module Control(Opcode, PCWriteCond, PCWrite, IorD, MemRead, 
                MemWrite, MemtoReg, IRWrite, PCSource, 
-               ALUOp, ALUSrcA, ALUSrcB, RegWrite, RegDst);
-   input [5:0]  Opcode;
-   output       ALUSrcA, MemRead, MemWrite, MemtoReg, IorD;
-   output       PCWrite, PCWriteCond, IRWrite, PCWrite, RegDst, RegWrite;
-   output [1:0] ALUOp, ALUSrcB, PCSource;
-   localparam   FETCH  = 4'd0, DECODE = 4'd1, MEM_ADR= 4'd2,  MEM_RD = 4'd3,
-                MEM_WB = 4'd4, EXEC   = 4'd6, R_TYPE = 4'd7, BEQ_STATE = 4'd8,
-                J_STATE = 4'd9;
+               ALUOp, ALUSrcA, ALUSrcB, RegWrite, RegDst, reset, clock);
+   input [5:0]      Opcode;
+   input            reset;
+   input            clock;
    
-   reg [3:0]    state, next_state;
+   output reg       ALUSrcA, MemRead, MemWrite, MemtoReg, IorD;
+   output reg       PCWriteCond, IRWrite, PCWrite, RegDst, RegWrite;
+   output reg [1:0] ALUOp, ALUSrcB, PCSource;
+   localparam       FETCH  = 4'd0, DECODE = 4'd1, MEM_ADR= 4'd2,  MEM_RD = 4'd3,
+                    MEM_WB = 4'd4, EXEC   = 4'd6, R_TYPE = 4'd7, BEQ_STATE = 4'd8,
+                    J_STATE = 4'd9;
+   
+   reg [3:0]        state, next_state;
 
    // Sequential block to update the current state
    always @(posedge clock or posedge reset) begin
-       if (reset) state <= FETCH;
+      if (reset) state <= FETCH;
        else       state <= next_state;
    end
    
@@ -276,13 +238,17 @@ module Control(Opcode, PCWriteCond, PCWrite, IorD, MemRead,
            PCWrite = 1;
            next_state = FETCH;
         end
-      endcase
+      endcase // case (state)
+   end // always @ (*)
+   
 endmodule // Control
 
 module ALUControl(ALUOp, Funct, ALUControlOut, clock);
-   input [1:0]  ALUOp;
-   input [5:0]  Funct;
-   output [3:0] ALUControlOut;
+   input [1:0]      ALUOp;
+   input [5:0]      Funct;
+   input            clock;
+   
+   output reg [3:0] ALUControlOut;
    always @(*) begin
       case (ALUOp)
         2'b00: ALUControlOut = 4'b0010; // Force Add (LW, SW, ADDI)
@@ -304,89 +270,139 @@ module ALUControl(ALUOp, Funct, ALUControlOut, clock);
    end
 endmodule // ALUControl
 
-module Multicycle_Pipeline;
-   reg [31:0]  PC;
-   reg [31:0]  Instruction;
-   reg [31:0]  MemoryData;
-
-   reg         IorD;
-   reg [31:0]  Address;
-   reg [31:0]  ALUOut;
-   reg [1:0]   ALUSrcB;
-   reg         MemWrite;
-   reg         MemRead;
-   reg         IRWrite;
-   reg         RegDst;
-   reg         RegWrite;
-   reg         MemtoReg;
-
-   wire [31:0] Address;
-   wire [31:0] Write_data;
-   wire [31:0] A;
-   wire [31:0] signextend;
+module Multicycle_CPU(clock, reset);
+   input clock;
+   input reset;
    
-   // PC to memory address or aluoutput
-   if ( (PCWriteCond & zero) | PCWrite)
-     PC = jumpaddress;
-   
-   assign Address = IorD ? ALUOut : PC;
+   // --- STORAGE ELEMENTS ---
+   reg [31:0] PC;
+   reg [31:0] Instruction;
+   reg [31:0] ALUOut;
 
-   // address used in memory data
-   SRAM memory(
-               .address(Address),
-               .dout(MemoryData),
-               .din(WriteData),
-               .MemWrite(MemWrite),
-               .MemRead(MemRead),
-               .clock(clock)
-               );
+   // --- WIRES ---
+   wire [31:0] Address, WriteData, ALUresult;
+   wire [31:0] A; 
+   reg [31:0]  B; // reg because it's in a case block
+   wire [31:0] signextended;
+   wire [31:0] MemoryData;
+   wire [31:0] ReadData1, ReadData2;
+   wire [4:0]  WriteRegister;
+   wire [3:0]  ALUControlOut;
+   wire [1:0]  ALUOp, ALUSrcB, PCSource;
+   wire        zero, IorD, MemWrite, MemRead, IRWrite;
+   wire        RegDst, RegWrite, MemtoReg, ALUSrcA, PCWrite, PCWriteCond;
+   reg [31:0]  jumpaddress;
 
-   // instruction write
-   assign Instruction = IRWrite ? MemoryData : Instruction;
-   Control control(
-                   .Opcode(Instruction[31:26]), .PCWriteCond(PCWriteCond), .PCWrite(PCWrite),
-                   .IorD(IorD), .MemRead(MemRead), .MemWrite(MemWrite), .MemtoReg(MemtoReg),
-                   .IRWrite(IRWrite), .PCSource(PCSource), .ALUOp(ALUop),
-                   .ALUSrcA(ALUSrcA), .ALUSrcB(ALUSrcB), .RegWrite(RegWrite),
-                   .RegDst(RegDst)
-                   );
-   assign WriteData = MemtoReg ? MemoryData : ALUOut;
-   assign signextended = {{16{Instruction[15]}}, Instruction[15:0]};
-   assign WriteRegister = RegDst ? instruction[15:11] : instruction[20:16];
-   RegisterFile register(
-                         .read1(instruction[25:21]), .read2(instruction[20:16]),
-                         .write_register(WriteRegister), .write_data(WriteData),
-                         .read_data_1(ReadData1), .read_data_2(ReadData2),
-                         .reg_write(WriteData), .clock(clock)
-                         );
+   initial begin
+      $display("\nTime | State | PC       | Instr    | A_Src | B_Src | ALUOp | RegW | MemW | clock");
+      $display("----------------------------------------------------------------------------------");
+   end
+
+   // ALUOut needs to be updated every cycle to hold the result
+   always @(posedge clock) ALUOut <= ALUresult;
    
-   assign A = ALUSrcA ? ReadData1 : PC;
+   always @(posedge clock) begin
+      if (!reset) begin
+         // $strobe ensures we see the values AFTER they settle on the clock edge
+         $strobe("%4t | %5d | %h | %h |   %b   |  %b   |  %b   |  %b   |  %b   |  %b", 
+                 $time, control.state, PC, Instruction, ALUSrcA, ALUSrcB, ALUOp, RegWrite, MemWrite, clock);
+      end
+   end
+   // --- SEQUENTIAL LOGIC ---
+   always @(posedge clock) begin
+      if (reset)
+        PC <= 32'h00400000;
+      else if ((PCWriteCond & zero) || PCWrite)
+        PC <= jumpaddress; // Non-blocking!
+   end
+
+   // Instruction Register Update
+   always @(posedge clock) begin
+      if (IRWrite)
+        Instruction <= MemoryData;
+   end
+
+   // --- COMBINATIONAL MUXES ---
+   assign Address       = IorD ? ALUOut : PC;
+   assign WriteData     = MemtoReg ? MemoryData : ALUOut;
+   assign signextended  = {{16{Instruction[15]}}, Instruction[15:0]};
+   assign WriteRegister = RegDst ? Instruction[15:11] : Instruction[20:16];
+   assign A             = ALUSrcA ? ReadData1 : PC;
+
    always @(*) begin
       case (ALUSrcB)
-        2'b00: B = ReadData2;          // R-type instructions
-        2'b01: B = 32'd4;             // PC + 4 increment
-        2'b10: B = signextended;      // I-type instructions (e.g., addi, lw)
-        2'b11: B = signextended << 2; // Branch offsets (PC-relative)
-        default: B = 32'b0;           // Safety catch-all
-      endcase // case (ALUSrcB)
+        2'b00: B = ReadData2;
+        2'b01: B = 32'd4;
+        2'b10: B = signextended;
+        2'b11: B = signextended << 2;
+        default: B = 32'b0;
+      endcase
    end
-         
-   ALUControl alucontrol(
-                         .ALUOp(ALUOp), .Funct(Instruction[5:0]),
-                         .ALUControlOut(ALUControlOut), .clock(clock)
-                         );
-   ALU alu(
-           .a(A), .b(B), 
-           .op(ALUControlOut), 
-           .result(ALUresult), 
-           .zero(zero), .clock(clock)
-           );
-   
+
    always @(*) begin
       case (PCSource)
         2'b00: jumpaddress = ALUresult;
         2'b01: jumpaddress = ALUOut;
-        2'b10: jumpaddress = (Instruction[25:0] << 2) | (PC[31:28] << 28);
+        2'b10: jumpaddress = {PC[31:28], Instruction[25:0], 2'b00};
+        default: jumpaddress = ALUresult;
       endcase
    end
-endmodule // Multicycle_Pipeline
+
+   // --- MODULE INSTANTIATIONS ---
+   SRAM memory (
+                .address(Address), .dout(MemoryData), .din(ReadData2), 
+                .MemWrite(MemWrite), .MemRead(MemRead), .clock(clock)
+                );
+
+   Control control (
+                    .Opcode(Instruction[31:26]), .PCWriteCond(PCWriteCond), .PCWrite(PCWrite),
+                    .IorD(IorD), .MemRead(MemRead), .MemWrite(MemWrite), .MemtoReg(MemtoReg),
+                    .IRWrite(IRWrite), .PCSource(PCSource), .ALUOp(ALUOp), .ALUSrcA(ALUSrcA), 
+                    .ALUSrcB(ALUSrcB), .RegWrite(RegWrite), .RegDst(RegDst), .reset(reset), .clock(clock)
+                    );
+
+   RegisterFile register (
+                          .read1(Instruction[25:21]), .read2(Instruction[20:16]),
+                          .write_register(WriteRegister), .write_data(WriteData),
+                          .read_data_1(ReadData1), .read_data_2(ReadData2),
+                          .reg_write(RegWrite), .clock(clock)
+                          );
+
+   ALUControl alucontrol (
+                          .ALUOp(ALUOp), .Funct(Instruction[5:0]), .ALUControlOut(ALUControlOut), .clock(clock)
+                          );
+
+   ALU alu (
+            .a(A), .b(B), .op(ALUControlOut), .result(ALUresult), .zero(zero), .clock(clock)
+            );
+
+endmodule // Multicycle_CPU
+
+module testCPU;
+
+   reg clock;
+   reg reset;
+
+   Multicycle_CPU cpu(.clock(clock), .reset(reset));
+
+   always #5 clock = ~clock;
+
+   initial begin
+      // 1. Initialize signals
+      clock = 0;
+      reset = 1;         // Start in reset
+      // $monitor("Time=%0t | clock=%b | reset=%b", $time, clock, reset);
+      
+      // 2. Wait a bit, then release reset
+      #15;               // Wait 1.5 clock cycles
+      reset = 0;         // CPU begins FETCH (State 0) now
+      
+      // 3. Monitor the end of the simulation
+      // Run for 200 time units (adjust based on your program length)
+      #2000; 
+      
+      $display("Simulation finished. Check the trace above.");
+      $finish;           // Terminate the simulation
+   end // initial begin
+endmodule // testCPU
+
